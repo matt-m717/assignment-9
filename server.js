@@ -25,7 +25,8 @@ function requireAuth(req, res, next) {
         req.user = {
             id: decoded.id,
             username: decoded.username,
-            email: decoded.email
+            email: decoded.email,
+            role: decoded.role
         };
 
         next();
@@ -37,6 +38,35 @@ function requireAuth(req, res, next) {
         } else {
             return res.status(401).json({ error: "Token verification failed" });
         }
+    }
+}
+
+function requireManager(req, res, next) {
+    if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+    }
+
+    console.log(req.user.role);
+    if (req.user.role === "manager" || req.user.role === "admin") {
+        next();
+    } else {
+        return res.status(403).json({
+            error: "Access denied. Manager or higher role required."
+        });
+    }
+}
+
+function requireAdmin(req, res, next) {
+    if (!req.user) {
+        return res.status(401).json({ error: "Authentication required" });
+    }
+
+    if (req.user.role === "admin") {
+        next();
+    } else {
+        return res.status(403).json({
+            error: "Access denied. Admin role required."
+        });
     }
 }
 
@@ -57,7 +87,7 @@ testConnection();
 // POST /api/register - Register new user
 app.post("/api/register", async (req, res) => {
     try {
-        const { name, email, password } = req.body;
+        const { name, email, password, role } = req.body;
 
         // Check if user exists
         const existingUser = await User.findOne({ where: { email } });
@@ -74,8 +104,8 @@ app.post("/api/register", async (req, res) => {
         const newUser = await User.create({
             name,
             email,
-            password: hashedPassword
-            // TODO: Add role field
+            password: hashedPassword,
+            role
         });
 
         res.status(201).json({
@@ -83,7 +113,8 @@ app.post("/api/register", async (req, res) => {
             user: {
                 id: newUser.id,
                 name: newUser.name,
-                email: newUser.email
+                email: newUser.email,
+                role: newUser.role
             }
         });
     } catch (error) {
@@ -159,8 +190,8 @@ app.get("/api/users/profile", requireAuth, async (req, res) => {
     }
 });
 
-// GET /api/users - Get all users (TODO: Admin only)
-app.get("/api/users", requireAuth, async (req, res) => {
+// GET /api/users - Get all users
+app.get("/api/users", requireAuth, requireAdmin, async (req, res) => {
     try {
         const users = await User.findAll({
             attributes: ["id", "name", "email"] // Don't return passwords
@@ -229,8 +260,8 @@ app.get("/api/projects/:id", requireAuth, async (req, res) => {
     }
 });
 
-// POST /api/projects - Create new project (TODO: Manager+ only)
-app.post("/api/projects", requireAuth, async (req, res) => {
+// POST /api/projects - Create new project
+app.post("/api/projects", requireAuth, requireManager, async (req, res) => {
     try {
         const { name, description, status = "active" } = req.body;
 
@@ -248,8 +279,8 @@ app.post("/api/projects", requireAuth, async (req, res) => {
     }
 });
 
-// PUT /api/projects/:id - Update project (TODO: Manager+ only)
-app.put("/api/projects/:id", requireAuth, async (req, res) => {
+// PUT /api/projects/:id - Update project
+app.put("/api/projects/:id", requireAuth, requireManager, async (req, res) => {
     try {
         const { name, description, status } = req.body;
 
@@ -270,8 +301,8 @@ app.put("/api/projects/:id", requireAuth, async (req, res) => {
     }
 });
 
-// DELETE /api/projects/:id - Delete project (TODO: Admin only)
-app.delete("/api/projects/:id", requireAuth, async (req, res) => {
+// DELETE /api/projects/:id - Delete project
+app.delete("/api/projects/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
         const deletedRowsCount = await Project.destroy({
             where: { id: req.params.id }
@@ -311,31 +342,36 @@ app.get("/api/projects/:id/tasks", requireAuth, async (req, res) => {
     }
 });
 
-// POST /api/projects/:id/tasks - Create task (TODO: Manager+ only)
-app.post("/api/projects/:id/tasks", requireAuth, async (req, res) => {
-    try {
-        const {
-            title,
-            description,
-            assignedUserId,
-            priority = "medium"
-        } = req.body;
+// POST /api/projects/:id/tasks - Create task
+app.post(
+    "/api/projects/:id/tasks",
+    requireAuth,
+    requireManager,
+    async (req, res) => {
+        try {
+            const {
+                title,
+                description,
+                assignedUserId,
+                priority = "medium"
+            } = req.body;
 
-        const newTask = await Task.create({
-            title,
-            description,
-            projectId: req.params.id,
-            assignedUserId,
-            priority,
-            status: "pending"
-        });
+            const newTask = await Task.create({
+                title,
+                description,
+                projectId: req.params.id,
+                assignedUserId,
+                priority,
+                status: "pending"
+            });
 
-        res.status(201).json(newTask);
-    } catch (error) {
-        console.error("Error creating task:", error);
-        res.status(500).json({ error: "Failed to create task" });
+            res.status(201).json(newTask);
+        } catch (error) {
+            console.error("Error creating task:", error);
+            res.status(500).json({ error: "Failed to create task" });
+        }
     }
-});
+);
 
 // PUT /api/tasks/:id - Update task
 app.put("/api/tasks/:id", requireAuth, async (req, res) => {
@@ -359,8 +395,8 @@ app.put("/api/tasks/:id", requireAuth, async (req, res) => {
     }
 });
 
-// DELETE /api/tasks/:id - Delete task (TODO: Manager+ only)
-app.delete("/api/tasks/:id", requireAuth, async (req, res) => {
+// DELETE /api/tasks/:id - Delete task
+app.delete("/api/tasks/:id", requireAuth, requireManager, async (req, res) => {
     try {
         const deletedRowsCount = await Task.destroy({
             where: { id: req.params.id }
